@@ -14,7 +14,7 @@ import scipy
 ### Load data
 DATA_PATH="/home/samuel/data/CORE-final"
 csv.field_size_limit(1000000)
-top_level_labels = set("NA OP IN ID HI IP LY SP OTHER".split())
+
 
 def read_tsv(filename, label_index=0, sentence_index=1):
     with open(filename) as tsv_file:
@@ -38,8 +38,9 @@ for d in data.values():
 label_list = list(label_list)
 """
 
+top_level_labels = set("NA OP IN ID HI IP LY SP OTHER".split())
 def normalize_label(label):
-    return '-'.join(sorted([l if l in top_level_labels else l.lower() for l in label.split()]))
+    return ' '.join(sorted([l if l in top_level_labels else l.lower() for l in label.split()]))
 
 
 label_counter = collections.defaultdict(lambda: 0)
@@ -47,7 +48,7 @@ for d in data.values():
     for label, _ in d:
         label_counter[normalize_label(label)] += 1
 
-label_list = [l for l,c in label_counter.items() if c > 1]
+label_list = [l for l,c in label_counter.items()]# if c > 1]
 label2idx = {l:i for i,l in enumerate(label_list)}
 
 ### Tokenize
@@ -57,7 +58,7 @@ from tokenizers import BertWordPieceTokenizer
 tokenizer = BertWordPieceTokenizer("bert-base-uncased-vocab.txt", lowercase=True, )
 
 MAX_LEN = 512
-BATCH_SIZE = 9
+BATCH_SIZE = 8
 # Tokenize all of the sentences and map the tokens to thier word IDs.
 data_loader = {}
 
@@ -66,21 +67,31 @@ for dataset in data:
     input_ids = []
     attn_masks = []
     labels = []
-
+    j = 0
     for i, (label, sent) in enumerate(data[dataset]):
         l = normalize_label(label)
         if l not in label2idx:
             print("        Skipping label", label)
             continue
         if i % 1000 == 0:
-            print("    sample",i)
+            print("    sample %d (%d)" % (i,j))
         tok = tokenizer.encode(sent)#, add_special_tokens = True, max_length=MAX_LEN)#["input_ids"]
+        sent_ids = tok.ids
+        attn_mask = tok.attention_mask
+        while len(sent_ids) > MAX_LEN:
+            input_ids.append(sent_ids[:MAX_LEN])
+            sent_ids = sent_ids[MAX_LEN:]
+            attn_masks.append(attn_mask[:MAX_LEN])
+            attn_mask = attn_mask[MAX_LEN:]
+            labels.append(label2idx[l])
+            j += 1
         #sent_ids, token_type_ids = sent, sent["token_type_ids"]
-        attn_mask = tok.attention_mask[:MAX_LEN]+[0]*(MAX_LEN-len(tok.attention_mask))
-        sent_ids = tok.ids[:MAX_LEN] + [0]*(MAX_LEN-len(tok.ids))
+        sent_ids = sent_ids + [0]*(MAX_LEN-len(sent_ids))
+        attn_mask = attn_mask+[0]*(MAX_LEN-len(attn_mask))
         input_ids.append(sent_ids)
         attn_masks.append(attn_mask)
         labels.append(label2idx[l])
+        j += 1
     input_ids = torch.tensor(input_ids).to('cuda')
     attn_masks = torch.tensor(attn_masks).to('cuda')
     labels = torch.tensor(labels).to('cuda')
@@ -110,7 +121,10 @@ optimizer = AdamW(model.parameters(),
                   eps = 1e-8 # args.adam_epsilon  - default is 1e-8.
                 )
 
-epochs = 3
+"""  Accuracy: 52.09
+     Average training loss: 2.00"""
+
+epochs = 4
 total_steps = len(data['train']) * epochs
 
 scheduler = get_linear_schedule_with_warmup(optimizer,
@@ -154,41 +168,34 @@ for ep in range(epochs):
     print("Epoch", ep)
     total_loss = 0
     model.train() #Mode
-
     # For each batch of training data...
     for step, batch in enumerate(data_loader['train']):
         # Progress update every 40 batches.
         if step % 40 == 0 and not step == 0:
             # Report progress.
             print('  Batch {:>5,}  of  {:>5,}.'.format(step, len(data_loader['train'])))
-
         b_input_ids = batch[0].to(device)
         b_input_mask = batch[1].to(device)
         b_labels = batch[2].to(device)
-
         model.zero_grad()
-
         outputs = model(b_input_ids,
                     token_type_ids=None,
                     attention_mask=b_input_mask,
                     labels=b_labels)
-
         loss = outputs[0]
         total_loss += loss.item()
-
         # Perform a backward pass to calculate the gradients.
-        loss.backward()
+        _ = loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         scheduler.step()
-
     evaluate(model)
     avg_train_loss = total_loss / len(data_loader['train'])
     print("  Average training loss: {0:.2f}".format(avg_train_loss))
 
 #evaluate(model)
 
-output_dir = 'output'
+output_dir = 'output3'
 model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
-#model_to_save.save_pretrained(output_dir)
+model_to_save.save_pretrained(output_dir)
 #tokenizer.save_pretrained(output_dir)
