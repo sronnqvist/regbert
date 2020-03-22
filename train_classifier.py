@@ -51,6 +51,8 @@ for d in data.values():
 label_list = [l for l,c in label_counter.items()]# if c > 1]
 label2idx = {l:i for i,l in enumerate(label_list)}
 
+print("Labels:", ', '.join(list(label2idx.keys())))
+
 ### Tokenize
 print("Loading BERT tokenizer...")
 #tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
@@ -58,6 +60,8 @@ from tokenizers import BertWordPieceTokenizer
 tokenizer = BertWordPieceTokenizer("bert-base-uncased-vocab.txt", lowercase=True, )
 
 MAX_LEN = 512
+STEP = MAX_LEN
+TRAVERSE_DOC = True
 BATCH_SIZE = 8
 # Tokenize all of the sentences and map the tokens to thier word IDs.
 data_loader = {}
@@ -78,16 +82,19 @@ for dataset in data:
         tok = tokenizer.encode(sent)#, add_special_tokens = True, max_length=MAX_LEN)#["input_ids"]
         sent_ids = tok.ids
         attn_mask = tok.attention_mask
-        while len(sent_ids) > MAX_LEN:
-            input_ids.append(sent_ids[:MAX_LEN])
-            sent_ids = sent_ids[MAX_LEN:]
-            attn_masks.append(attn_mask[:MAX_LEN])
-            attn_mask = attn_mask[MAX_LEN:]
-            labels.append(label2idx[l])
-            j += 1
-        #sent_ids, token_type_ids = sent, sent["token_type_ids"]
-        sent_ids = sent_ids + [0]*(MAX_LEN-len(sent_ids))
-        attn_mask = attn_mask+[0]*(MAX_LEN-len(attn_mask))
+        if TRAVERSE_DOC:
+            while len(sent_ids) > MAX_LEN:
+                input_ids.append(sent_ids[:MAX_LEN])
+                sent_ids = sent_ids[STEP:]
+                attn_masks.append(attn_mask[:MAX_LEN])
+                attn_mask = attn_mask[STEP:]
+                labels.append(label2idx[l])
+                j += 1
+            sent_ids = sent_ids + [0]*(MAX_LEN-len(sent_ids))
+            attn_mask = attn_mask+[0]*(MAX_LEN-len(attn_mask))
+        else:
+            sent_ids = sent_ids[:MAX_LEN] + [0]*(MAX_LEN-len(sent_ids))
+            attn_mask = attn_mask[:MAX_LEN]+[0]*(MAX_LEN-len(attn_mask))
         input_ids.append(sent_ids)
         attn_masks.append(attn_mask)
         labels.append(label2idx[l])
@@ -122,7 +129,11 @@ optimizer = AdamW(model.parameters(),
                 )
 
 """  Accuracy: 52.09
-     Average training loss: 2.00"""
+     Average training loss: 2.00
+
+     Accuracy: 50.63 (traverse doc step=512, eval on non-traverse)
+     Accuracy: 40.42 (traverse doc step=512, eval on same)
+"""
 
 epochs = 4
 total_steps = len(data['train']) * epochs
@@ -132,14 +143,14 @@ scheduler = get_linear_schedule_with_warmup(optimizer,
                                             num_training_steps = total_steps)
 
 
-def evaluate(model):
+def evaluate(model, dataset='dev'):
     ### Validation
     model.eval()
     eval_correct, eval_all = 0, 0
     all_preds = []
     all_true = []
     # Evaluate data for one epoch
-    for batch in data_loader['dev']:
+    for batch in data_loader[dataset]:
         batch = tuple(t.to(device) for t in batch)
         b_input_ids, b_input_mask, b_labels = batch
         with torch.no_grad():
