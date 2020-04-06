@@ -209,4 +209,3 @@ for ep in range(epochs):
 output_dir = 'output3'
 model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
 model_to_save.save_pretrained(output_dir)
-#tokenizer.save_pretrained(output_dir)
