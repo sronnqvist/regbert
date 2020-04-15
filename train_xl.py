@@ -61,7 +61,7 @@ from tokenizers import BertWordPieceTokenizer
 #tokenizer = BertWordPieceTokenizer("bert-base-uncased-vocab.txt", lowercase=True, )
 tokenizer = TransfoXLTokenizer.from_pretrained('transfo-xl-wt103')
 
-MAX_LEN = 1000
+MAX_LEN = 500
 BATCH_SIZE = 1
 # Tokenize all of the sentences and map the tokens to thier word IDs.
 data_loader = {}
@@ -176,9 +176,10 @@ for ep in range(epochs):
         #            token_type_ids=None,
         #            attention_mask=b_input_mask,
         #            labels=b_labels)
-        loss = outputs[0]
-        total_loss += loss.sum().item()
+        loss = outputs[0].sum()
+        total_loss += loss.item()
         # Perform a backward pass to calculate the gradients.
+        #import pdb; pdb.set_trace()
         _ = loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
