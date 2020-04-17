@@ -22,13 +22,14 @@ def initialize_arguments(p: configargparse.ArgParser):
     p.add('--epochs', help='Epochs to train', type=int)
     #Optimizer arguments
     p.add('--learning_rate', help='Optimizer step size', type=float)
-    p.add('--weight_decay', help='Adam regularization', type=float)
-    args = p.parse_args()
+    #p.add('--weight_decay', help='Adam regularization', type=float)
+    return p.parse_args()
 
 args = initialize_arguments(configargparse.ArgParser(default_config_files=["config.ini"]))
 
 ### Load data
-DATA_PATH="/home/samuel/data/CORE-final"
+#DATA_PATH="/home/samuel/data/CORE-final"
+DATA_PATH = args.data
 csv.field_size_limit(1000000)
 
 
@@ -44,7 +45,7 @@ def read_tsv(filename, label_index=0, sentence_index=1):
 data = {}
 for dataset in ['train', 'dev', 'test']:
     print("Preparing", dataset)
-    data[dataset] = [x for x in read_tsv(os.path.join(DATA_PATH, dataset+'.tsv'), sentence_index=2)]
+    data[dataset] = [x for x in read_tsv(os.path.join(DATA_PATH, dataset+'.tsv'), sentence_index=args.sentence_index)]
 
 """
 label_list = set()
@@ -76,8 +77,8 @@ from tokenizers import BertWordPieceTokenizer
 #tokenizer = BertWordPieceTokenizer("bert-base-uncased-vocab.txt", lowercase=True, )
 tokenizer = TransfoXLTokenizer.from_pretrained('transfo-xl-wt103')
 
-MAX_LEN = 500
-BATCH_SIZE = 1
+MAX_LEN = args.max_len
+BATCH_SIZE = args.batch_size
 # Tokenize all of the sentences and map the tokens to thier word IDs.
 data_loader = {}
 
@@ -128,12 +129,12 @@ model.cuda()
 #model.from_pretrained('output')
 
 optimizer = AdamW(model.parameters(),
-                  lr = 5e-6, # args.learning_rate - default is 5e-5, our notebook had 2e-5
+                  lr = args.learning_rate, # args.learning_rate - default is 5e-5, our notebook had 2e-5
                   eps = 1e-8 # args.adam_epsilon  - default is 1e-8.
                 )
 
 
-epochs = 4
+epochs = args.epochs
 total_steps = len(data['train']) * epochs
 
 scheduler = get_linear_schedule_with_warmup(optimizer,
