@@ -10,7 +10,22 @@ import csv
 import os
 import numpy as np
 import scipy
+import configargparse
 
+
+def initialize_arguments(p: configargparse.ArgParser):
+    p.add('--data', help='Data directory', type=str)
+    p.add('--sentence_index', help='Column index of sentences in data file', type=int)
+
+    p.add('--batch_size', help='Batch size for training multi-label document classifier', type=int)
+    p.add('--max_len', help='Maximum sequence length', type=int)
+    p.add('--epochs', help='Epochs to train', type=int)
+    #Optimizer arguments
+    p.add('--learning_rate', help='Optimizer step size', type=float)
+    p.add('--weight_decay', help='Adam regularization', type=float)
+    args = p.parse_args()
+
+args = initialize_arguments(configargparse.ArgParser(default_config_files=["config.ini"]))
 
 ### Load data
 DATA_PATH="/home/samuel/data/CORE-final"
@@ -172,12 +187,12 @@ for ep in range(epochs):
         b_input_mask = batch[1].to(device)
         b_labels = batch[2].to(device)
         model.zero_grad()
-        outputs = model(b_input_ids)
+        outputs = model(b_input_ids,
+                            attention_mask=b_input_mask,
+                            labels=b_labels)
         #            token_type_ids=None,
-        #            attention_mask=b_input_mask,
-        #            labels=b_labels)
-        loss = outputs[0].sum()
-        total_loss += loss.item()
+        loss = outputs[0]
+        total_loss += loss.sum().item()
         # Perform a backward pass to calculate the gradients.
         #import pdb; pdb.set_trace()
         _ = loss.backward()
