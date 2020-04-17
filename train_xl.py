@@ -10,10 +10,26 @@ import csv
 import os
 import numpy as np
 import scipy
+import configargparse
 
+
+def initialize_arguments(p: configargparse.ArgParser):
+    p.add('--data', help='Data directory', type=str)
+    p.add('--sentence_index', help='Column index of sentences in data file', type=int)
+
+    p.add('--batch_size', help='Batch size for training multi-label document classifier', type=int)
+    p.add('--max_len', help='Maximum sequence length', type=int)
+    p.add('--epochs', help='Epochs to train', type=int)
+    #Optimizer arguments
+    p.add('--learning_rate', help='Optimizer step size', type=float)
+    #p.add('--weight_decay', help='Adam regularization', type=float)
+    return p.parse_args()
+
+args = initialize_arguments(configargparse.ArgParser(default_config_files=["config.ini"]))
 
 ### Load data
-DATA_PATH="CORE-final"
+#DATA_PATH="/home/samuel/data/CORE-final"
+DATA_PATH = args.data
 csv.field_size_limit(1000000)
 
 
@@ -29,7 +45,7 @@ def read_tsv(filename, label_index=0, sentence_index=1):
 data = {}
 for dataset in ['train', 'dev', 'test']:
     print("Preparing", dataset)
-    data[dataset] = [x for x in read_tsv(os.path.join(DATA_PATH, dataset+'.tsv'), sentence_index=1)]
+    data[dataset] = [x for x in read_tsv(os.path.join(DATA_PATH, dataset+'.tsv'), sentence_index=args.sentence_index)]
 
 """
 label_list = set()
@@ -61,8 +77,8 @@ from tokenizers import BertWordPieceTokenizer
 #tokenizer = BertWordPieceTokenizer("bert-base-uncased-vocab.txt", lowercase=True, )
 tokenizer = TransfoXLTokenizer.from_pretrained('transfo-xl-wt103')
 
-MAX_LEN = 512*2
-BATCH_SIZE = 1
+MAX_LEN = args.max_len
+BATCH_SIZE = args.batch_size
 # Tokenize all of the sentences and map the tokens to thier word IDs.
 data_loader = {}
 
@@ -71,7 +87,7 @@ for dataset in data:
     input_ids = []
     attn_masks = []
     labels = []
-    for i, (label, sent) in enumerate(data[dataset]):
+    for i, (label, sent) in enumerate(data[dataset][:1000]):
         l = normalize_label(label)
         if l not in label2idx:
             print("        Skipping label", label)
@@ -113,12 +129,12 @@ model.cuda()
 #model.from_pretrained('output')
 
 optimizer = AdamW(model.parameters(),
-                  lr = 1e-2, # args.learning_rate - default is 5e-5, our notebook had 2e-5
+                  lr = args.learning_rate, # args.learning_rate - default is 5e-5, our notebook had 2e-5
                   eps = 1e-8 # args.adam_epsilon  - default is 1e-8.
                 )
 
 
-epochs = 3
+epochs = args.epochs
 total_steps = len(data['train']) * epochs
 
 scheduler = get_linear_schedule_with_warmup(optimizer,
@@ -164,13 +180,12 @@ for ep in range(epochs):
     model.train() #Mode
     # For each batch of training data...
     for step, batch in enumerate(data_loader['train']):
-        b_input_ids = batch[0].to(device)
         b_input_mask = batch[1].to(device)
         b_labels = batch[2].to(device)
         model.zero_grad()
         outputs = model(b_input_ids,
-                    attention_mask=b_input_mask,
-                    labels=b_labels)
+                            attention_mask=b_input_mask,
+                            labels=b_labels)
         #            token_type_ids=None,
         loss = outputs[0]
         losses.append(loss.sum().item())
@@ -195,7 +210,4 @@ for ep in range(epochs):
     output_dir = 'output'
     model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
     model_to_save.save_pretrained(output_dir)
-
-#evaluate(model)
-
 
