@@ -13,7 +13,7 @@ import scipy
 
 
 ### Load data
-DATA_PATH="/home/samuel/data/CORE-final"
+DATA_PATH="CORE-final"
 csv.field_size_limit(1000000)
 
 
@@ -29,7 +29,7 @@ def read_tsv(filename, label_index=0, sentence_index=1):
 data = {}
 for dataset in ['train', 'dev', 'test']:
     print("Preparing", dataset)
-    data[dataset] = [x for x in read_tsv(os.path.join(DATA_PATH, dataset+'.tsv'), sentence_index=2)]
+    data[dataset] = [x for x in read_tsv(os.path.join(DATA_PATH, dataset+'.tsv'), sentence_index=1)]
 
 """
 label_list = set()
@@ -61,7 +61,7 @@ from tokenizers import BertWordPieceTokenizer
 #tokenizer = BertWordPieceTokenizer("bert-base-uncased-vocab.txt", lowercase=True, )
 tokenizer = TransfoXLTokenizer.from_pretrained('transfo-xl-wt103')
 
-MAX_LEN = 500
+MAX_LEN = 512*2
 BATCH_SIZE = 1
 # Tokenize all of the sentences and map the tokens to thier word IDs.
 data_loader = {}
@@ -71,7 +71,7 @@ for dataset in data:
     input_ids = []
     attn_masks = []
     labels = []
-    for i, (label, sent) in enumerate(data[dataset][:1000]):
+    for i, (label, sent) in enumerate(data[dataset]):
         l = normalize_label(label)
         if l not in label2idx:
             print("        Skipping label", label)
@@ -113,12 +113,12 @@ model.cuda()
 #model.from_pretrained('output')
 
 optimizer = AdamW(model.parameters(),
-                  lr = 5e-6, # args.learning_rate - default is 5e-5, our notebook had 2e-5
+                  lr = 1e-2, # args.learning_rate - default is 5e-5, our notebook had 2e-5
                   eps = 1e-8 # args.adam_epsilon  - default is 1e-8.
                 )
 
 
-epochs = 4
+epochs = 3
 total_steps = len(data['train']) * epochs
 
 scheduler = get_linear_schedule_with_warmup(optimizer,
@@ -160,37 +160,42 @@ def evaluate(model, dataset='dev'):
 print("Training...")
 for ep in range(epochs):
     print("Epoch", ep)
-    total_loss = 0
+    losses = []
     model.train() #Mode
     # For each batch of training data...
     for step, batch in enumerate(data_loader['train']):
-        # Progress update every 40 batches.
-        if step % 40 == 0 and not step == 0:
-            # Report progress.
-            print('  Batch {:>5,}  of  {:>5,}.'.format(step, len(data_loader['train'])))
         b_input_ids = batch[0].to(device)
         b_input_mask = batch[1].to(device)
         b_labels = batch[2].to(device)
         model.zero_grad()
-        outputs = model(b_input_ids)
+        outputs = model(b_input_ids,
+                    attention_mask=b_input_mask,
+                    labels=b_labels)
         #            token_type_ids=None,
-        #            attention_mask=b_input_mask,
-        #            labels=b_labels)
-        loss = outputs[0].sum()
-        total_loss += loss.item()
+        loss = outputs[0]
+        losses.append(loss.sum().item())
         # Perform a backward pass to calculate the gradients.
         #import pdb; pdb.set_trace()
         _ = loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         scheduler.step()
+
+        # Progress update
+        if step % 100 == 0 and not step == 0:
+            # Report progress.
+            print('  Batch {:>5,}  of  {:>5,}.'.format(step, len(data_loader['train'])))
+            avg_train_loss = np.mean(losses) #total_loss / (step+1) #len(data_loader['train'])
+            print("  Average training loss: {0:.2f}".format(avg_train_loss), flush=True)
+            losses = []
+        if step % 1000 == 0 and step > 0:
+            evaluate(model)
+
     evaluate(model)
-    avg_train_loss = total_loss / len(data_loader['train'])
-    print("  Average training loss: {0:.2f}".format(avg_train_loss))
+    output_dir = 'output'
+    model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
+    model_to_save.save_pretrained(output_dir)
 
 #evaluate(model)
-"""
-output_dir = 'output3'
-model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
-model_to_save.save_pretrained(output_dir)
-"""
+
+
